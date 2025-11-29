@@ -12,12 +12,12 @@ const genAI = API_KEY && API_KEY !== 'your_api_key_here'
 
 const model = genAI
   ? genAI.getGenerativeModel({
-      model: "gemini-2.0-flash-lite",
+      model: "gemini-2.5-flash",
       generationConfig: {
-        temperature: 2.0,  // Maximum temperature for maximum variation
-        topP: 1.0,         // Consider all tokens
-        topK: 64           // Wider token selection
-      }
+        temperature: 2.0, // Maximum temperature for maximum variation
+        topP: 1.0, // Consider all tokens
+        topK: 64, // Wider token selection
+      },
     })
   : null;
 
@@ -28,6 +28,7 @@ const model = genAI
 export async function generateMatch() {
   console.log("Generating new match...");
   if (!model) {
+    console.log("Gemini model not configured, using fallback match");
     return getFallbackMatch();
   }
 
@@ -136,11 +137,12 @@ UNDERDOGS:
  */
 export async function generateMatchNarrative(team1, team2, result) {
   if (!model) {
+    console.log("Gemini model not configured, using fallback narrative");
     return getFallbackNarrative(team1, team2, result);
   }
 
   // 55% chance for thriller mode (3 extra suspenseful highlights)
-  const isThrillerMode = Math.random() < 0.55;
+  const isThrillerMode = Math.random() < 1.0;
 
   const resultText =
     result === "TEAM1"

@@ -214,7 +214,7 @@ async function renderNarrativePhase() {
   const state = gameState.getState();
   clearElement(app);
 
-  await renderActionNarrative(app, state.currentMatch.actions, () => {
+  await renderActionNarrative(app, state.currentMatch.actions, state.currentMatch, () => {
     gameState.setPhase('RESULTS');
   });
 }
