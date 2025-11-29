@@ -193,11 +193,18 @@ async function generateNarrativeAndResult() {
 
   // Calculate winner
   const result = calculateWinner(match.odds);
+  console.log("🎲 Match result:", result);
   gameState.updateMatch({ result });
 
   // Generate narrative
+  console.log("📝 Generating narrative for:", match.team1, "vs", match.team2, "Result:", result);
   const actions = await generateMatchNarrative(match.team1, match.team2, result);
+  console.log("📝 Generated actions:", actions);
   gameState.updateMatch({ actions });
+
+  // Verify actions were set
+  const updatedState = gameState.getState();
+  console.log("✅ Actions in state:", updatedState.currentMatch.actions);
 
   // Move to narrative phase
   gameState.setPhase('NARRATIVE');

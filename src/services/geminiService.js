@@ -34,8 +34,15 @@ export async function generateMatch() {
   // Add random elements to prompt to prevent caching
   const randomNumber = Math.random();
   const timestamp = Date.now();
-  const randomLeagues = ['Premier League', 'La Liga', 'Serie A', 'Bundesliga', 'Ligue 1', 'MLS', 'Eredivisie', 'Liga MX'];
-  const suggestedLeague = randomLeagues[Math.floor(Math.random() * randomLeagues.length)];
+  const randomLeagues = [
+    "Premier League",
+    "La Liga",
+    "Serie A",
+    "Bundesliga",
+    "Ligue 1",
+  ];
+  const suggestedLeague =
+    randomLeagues[Math.floor(Math.random() * randomLeagues.length)];
 
   const prompt = `[Request ID: ${timestamp}-${randomNumber}]
 Generate a unique football match for a gambling game, preferably from ${suggestedLeague}. Return ONLY valid JSON with this exact structure:
@@ -125,15 +132,15 @@ UNDERDOGS:
  * @param {string} team1 - First team name
  * @param {string} team2 - Second team name
  * @param {string} result - 'TEAM1' | 'DRAW' | 'TEAM2'
- * @returns {Promise<Array<{text: string, suspense: boolean}>>} Array of action objects with text and suspense flag
+ * @returns {Promise<Array<{text: string, suspense: boolean, score: {team1: number, team2: number}}>>} Array of action objects with text, suspense flag, and current score
  */
 export async function generateMatchNarrative(team1, team2, result) {
   if (!model) {
     return getFallbackNarrative(team1, team2, result);
   }
 
-  // 5% chance for thriller mode (3 extra suspenseful highlights)
-  const isThrillerMode = Math.random() < 0.95;
+  // 55% chance for thriller mode (3 extra suspenseful highlights)
+  const isThrillerMode = Math.random() < 0.55;
 
   const resultText =
     result === "TEAM1"
@@ -151,8 +158,8 @@ The match result is: ${resultText}.
 
 Return ONLY a JSON array of 8-10 action objects with this structure:
 [
-  {"text": "Action 1", "suspense": false},
-  {"text": "Action 2", "suspense": true},
+  {"text": "Action 1", "suspense": false, "score": {"team1": 0, "team2": 0}},
+  {"text": "Action 2", "suspense": true, "score": {"team1": 1, "team2": 0}},
   ...
 ]
 
@@ -165,14 +172,21 @@ Requirements for THRILLER MODE:
 - Actions should keep the outcome uncertain until the very end
 - Mark 2-4 of the MOST SUSPENSEFUL moments with "suspense": true (VAR checks, last-minute chances, penalties, etc.)
 - Other actions should have "suspense": false
+- CRITICAL: Include "score" field with current score after each action
+- The FINAL score MUST match the result: ${resultText}
+- Scores should only change when goals are scored
 - Return ONLY the JSON array, no additional text
-Example: [{"text": "⚽ Kickoff! High stakes match begins!", "suspense": false}, {"text": "📺 VAR check! Possible penalty!", "suspense": true}]`;
+Example: [{"text": "⚽ Kickoff! High stakes match begins!", "suspense": false, "score": {"team1": 0, "team2": 0}}, {"text": "⚡ GOAL! ${team1} scores!", "suspense": false, "score": {"team1": 1, "team2": 0}}]`;
   } else {
     prompt = `Generate 5-7 exciting football match actions for: ${team1} vs ${team2}.
 The match result is: ${resultText}.
 
-Return ONLY a JSON array of action strings:
-["Action 1", "Action 2", "Action 3", ...]
+Return ONLY a JSON array of action objects with this structure:
+[
+  {"text": "Action 1", "score": {"team1": 0, "team2": 0}},
+  {"text": "Action 2", "score": {"team1": 1, "team2": 0}},
+  ...
+]
 
 Requirements:
 - Keep each action SHORT and SIMPLE (under 15 words)
@@ -180,18 +194,29 @@ Requirements:
 - Make actions exciting but concise
 - Actions should build up to the final result
 - Include key moments like goals, saves, near-misses
+- CRITICAL: Include "score" field with current score after each action
+- The FINAL score MUST match the result: ${resultText}
+- Scores should only change when goals are scored
 - Actions should be appropriate for the result
 - Return ONLY the JSON array, no additional text
-Example format: "⚽ Kickoff! ${team1} vs ${team2}!", "⚡ GOAL! ${team1} strikes first!"`;
+Example: [{"text": "⚽ Kickoff! ${team1} vs ${team2}!", "score": {"team1": 0, "team2": 0}}, {"text": "⚡ GOAL! ${team1} strikes first!", "score": {"team1": 1, "team2": 0}}]`;
   }
 
   try {
-    const result = await model.generateContent(prompt);
-    const response = await result.response;
+    const apiResult = await model.generateContent(prompt);
+    const response = await apiResult.response;
     const text = response.text();
 
-    // Extract JSON array from response
-    const jsonMatch = text.match(/\[[\s\S]*\]/);
+    console.log("🤖 RAW NARRATIVE OUTPUT:", text);
+
+    // Extract JSON array from response (handle markdown code blocks)
+    let jsonText = text;
+
+    // Remove markdown code blocks if present
+    jsonText = jsonText.replace(/```json\s*/g, "").replace(/```\s*/g, "");
+
+    // Extract JSON array
+    const jsonMatch = jsonText.match(/\[[\s\S]*\]/);
     if (!jsonMatch) {
       console.warn(
         "Could not extract JSON array from response, using fallback"
@@ -199,27 +224,61 @@ Example format: "⚽ Kickoff! ${team1} vs ${team2}!", "⚡ GOAL! ${team1} strike
       return getFallbackNarrative(team1, team2, result);
     }
 
-    const actions = JSON.parse(jsonMatch[0]);
+    // Clean up the JSON string (remove extra whitespace/tabs that break parsing)
+    let cleanedJson = jsonMatch[0]
+      .replace(/\n\s+/g, "\n") // Remove extra spaces after newlines
+      .replace(/\t/g, " ") // Replace tabs with spaces
+      .trim();
+
+    const actions = JSON.parse(cleanedJson);
+    console.log("✅ PARSED ACTIONS:", actions);
 
     if (!Array.isArray(actions) || actions.length === 0) {
       console.warn("Invalid actions array, using fallback");
       return getFallbackNarrative(team1, team2, result);
     }
 
-    // Normalize format: convert strings to objects for consistency
-    const normalizedActions = actions.map(action => {
-      if (typeof action === 'string') {
-        // Normal mode: simple strings
-        return { text: action, suspense: false };
+    // Normalize format and validate scores
+    const normalizedActions = actions.map((action) => {
+      let normalized;
+
+      if (typeof action === "string") {
+        // Legacy format: simple strings
+        normalized = {
+          text: action,
+          suspense: false,
+          score: { team1: 0, team2: 0 },
+        };
       } else if (action.text) {
-        // Thriller mode: objects with text and suspense
-        return action;
+        // New format: objects with text, suspense, and score
+        normalized = {
+          text: action.text,
+          suspense: action.suspense || false,
+          score: action.score || { team1: 0, team2: 0 },
+        };
       } else {
         // Fallback for unexpected format
-        return { text: String(action), suspense: false };
+        normalized = {
+          text: String(action),
+          suspense: false,
+          score: { team1: 0, team2: 0 },
+        };
       }
+
+      return normalized;
     });
 
+    // Validate final score matches result
+    const finalScore = normalizedActions[normalizedActions.length - 1]?.score;
+    if (finalScore) {
+      const scoreValid = validateFinalScore(finalScore, result);
+      if (!scoreValid) {
+        console.warn("Final score doesn't match result, using fallback");
+        return getFallbackNarrative(team1, team2, result);
+      }
+    }
+
+    console.log("✅ RETURNING NORMALIZED ACTIONS:", normalizedActions);
     return normalizedActions;
   } catch (error) {
     console.error("Error generating narrative:", error);
@@ -232,16 +291,16 @@ Example format: "⚽ Kickoff! ${team1} vs ${team2}!", "⚡ GOAL! ${team1} strike
  */
 function getFallbackMatch() {
   const teams = [
-    ['Manchester United', 'Liverpool'],
-    ['Real Madrid', 'Barcelona'],
-    ['Bayern Munich', 'Borussia Dortmund'],
-    ['AC Milan', 'Inter Milan'],
-    ['Arsenal', 'Chelsea'],
-    ['PSG', 'Lyon'],
-    ['Ajax', 'PSV'],
-    ['Celtic', 'Rangers'],
-    ['The Thunderbolts', 'The Lightning Strikers'],
-    ['Dragon FC', 'Phoenix United'],
+    ["Manchester United", "Liverpool"],
+    ["Real Madrid", "Barcelona"],
+    ["Bayern Munich", "Borussia Dortmund"],
+    ["AC Milan", "Inter Milan"],
+    ["Arsenal", "Chelsea"],
+    ["PSG", "Lyon"],
+    ["Ajax", "PSV"],
+    ["Celtic", "Rangers"],
+    ["The Thunderbolts", "The Lightning Strikers"],
+    ["Dragon FC", "Phoenix United"],
   ];
 
   const [team1, team2] = teams[Math.floor(Math.random() * teams.length)];
@@ -257,9 +316,23 @@ function getFallbackMatch() {
     odds: {
       team1Win: parseFloat(rand1.toFixed(2)),
       draw: parseFloat(rand2.toFixed(2)),
-      team2Win: parseFloat(rand3.toFixed(2))
-    }
+      team2Win: parseFloat(rand3.toFixed(2)),
+    },
   };
+}
+
+/**
+ * Validate that final score matches the result
+ */
+function validateFinalScore(score, result) {
+  if (result === "TEAM1") {
+    return score.team1 > score.team2;
+  } else if (result === "TEAM2") {
+    return score.team2 > score.team1;
+  } else if (result === "DRAW") {
+    return score.team1 === score.team2;
+  }
+  return false;
 }
 
 /**
@@ -268,32 +341,116 @@ function getFallbackMatch() {
 function getFallbackNarrative(team1, team2, result) {
   const narratives = {
     TEAM1: [
-      { text: `⚽ Kickoff! ${team1} vs ${team2} begins!`, suspense: false },
-      { text: `🏃 ${team1} dominates possession in the opening minutes`, suspense: false },
-      { text: `💨 A brilliant run down the wing by ${team1}'s striker!`, suspense: false },
-      { text: `⚡ GOAL! ${team1} takes the lead with a stunning strike!`, suspense: false },
-      { text: `🛡️ ${team2} pushes forward but ${team1}'s defense holds strong`, suspense: false },
-      { text: `🎯 Another goal! ${team1} extends their lead!`, suspense: false },
-      { text: `⏱️ Final whistle! ${team1} wins!`, suspense: false }
+      {
+        text: `⚽ Kickoff! ${team1} vs ${team2} begins!`,
+        suspense: false,
+        score: { team1: 0, team2: 0 },
+      },
+      {
+        text: `🏃 ${team1} dominates possession in the opening minutes`,
+        suspense: false,
+        score: { team1: 0, team2: 0 },
+      },
+      {
+        text: `💨 A brilliant run down the wing by ${team1}'s striker!`,
+        suspense: false,
+        score: { team1: 0, team2: 0 },
+      },
+      {
+        text: `⚡ GOAL! ${team1} takes the lead with a stunning strike!`,
+        suspense: false,
+        score: { team1: 1, team2: 0 },
+      },
+      {
+        text: `🛡️ ${team2} pushes forward but ${team1}'s defense holds strong`,
+        suspense: false,
+        score: { team1: 1, team2: 0 },
+      },
+      {
+        text: `🎯 Another goal! ${team1} extends their lead!`,
+        suspense: false,
+        score: { team1: 2, team2: 0 },
+      },
+      {
+        text: `⏱️ Final whistle! ${team1} wins!`,
+        suspense: false,
+        score: { team1: 2, team2: 0 },
+      },
     ],
     TEAM2: [
-      { text: `⚽ Match begins! ${team1} vs ${team2}!`, suspense: false },
-      { text: `🏃 ${team2} starts aggressively, pressing high`, suspense: false },
-      { text: `💨 Quick counter-attack by ${team2}!`, suspense: false },
-      { text: `⚡ GOAL! ${team2} scores first!`, suspense: false },
-      { text: `🛡️ ${team1} struggles to break through ${team2}'s defense`, suspense: false },
-      { text: `🎯 ${team2} scores again on the break!`, suspense: false },
-      { text: `⏱️ Game over! ${team2} takes the victory!`, suspense: false }
+      {
+        text: `⚽ Match begins! ${team1} vs ${team2}!`,
+        suspense: false,
+        score: { team1: 0, team2: 0 },
+      },
+      {
+        text: `🏃 ${team2} starts aggressively, pressing high`,
+        suspense: false,
+        score: { team1: 0, team2: 0 },
+      },
+      {
+        text: `💨 Quick counter-attack by ${team2}!`,
+        suspense: false,
+        score: { team1: 0, team2: 0 },
+      },
+      {
+        text: `⚡ GOAL! ${team2} scores first!`,
+        suspense: false,
+        score: { team1: 0, team2: 1 },
+      },
+      {
+        text: `🛡️ ${team1} struggles to break through ${team2}'s defense`,
+        suspense: false,
+        score: { team1: 0, team2: 1 },
+      },
+      {
+        text: `🎯 ${team2} scores again on the break!`,
+        suspense: false,
+        score: { team1: 0, team2: 2 },
+      },
+      {
+        text: `⏱️ Game over! ${team2} takes the victory!`,
+        suspense: false,
+        score: { team1: 0, team2: 2 },
+      },
     ],
     DRAW: [
-      { text: `⚽ The match kicks off between ${team1} and ${team2}!`, suspense: false },
-      { text: `🏃 Both teams trading attacks in a fast-paced game`, suspense: false },
-      { text: `⚡ GOAL! ${team1} opens the scoring!`, suspense: false },
-      { text: `💪 ${team2} fights back with intense pressure`, suspense: false },
-      { text: `⚡ GOAL! ${team2} equalizes!`, suspense: false },
-      { text: `🔥 End-to-end action but no one can find the winner`, suspense: false },
-      { text: `⏱️ Final whistle! It ends in a draw!`, suspense: false }
-    ]
+      {
+        text: `⚽ The match kicks off between ${team1} and ${team2}!`,
+        suspense: false,
+        score: { team1: 0, team2: 0 },
+      },
+      {
+        text: `🏃 Both teams trading attacks in a fast-paced game`,
+        suspense: false,
+        score: { team1: 0, team2: 0 },
+      },
+      {
+        text: `⚡ GOAL! ${team1} opens the scoring!`,
+        suspense: false,
+        score: { team1: 1, team2: 0 },
+      },
+      {
+        text: `💪 ${team2} fights back with intense pressure`,
+        suspense: false,
+        score: { team1: 1, team2: 0 },
+      },
+      {
+        text: `⚡ GOAL! ${team2} equalizes!`,
+        suspense: false,
+        score: { team1: 1, team2: 1 },
+      },
+      {
+        text: `🔥 End-to-end action but no one can find the winner`,
+        suspense: false,
+        score: { team1: 1, team2: 1 },
+      },
+      {
+        text: `⏱️ Final whistle! It ends in a draw!`,
+        suspense: false,
+        score: { team1: 1, team2: 1 },
+      },
+    ],
   };
 
   return narratives[result];
