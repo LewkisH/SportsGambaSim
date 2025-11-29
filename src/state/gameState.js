@@ -15,6 +15,7 @@ class GameState {
         actions: [],
         result: null // 'TEAM1' | 'DRAW' | 'TEAM2'
       },
+      nextMatch: null, // Pre-generated next match for faster UX
       roundNumber: 0
     };
     this.listeners = [];
@@ -39,6 +40,10 @@ class GameState {
   updateMatch(updates) {
     const currentMatch = { ...this.state.currentMatch, ...updates };
     this.setState({ currentMatch });
+  }
+
+  setNextMatch(match) {
+    this.setState({ nextMatch: match });
   }
 
   resetBets() {

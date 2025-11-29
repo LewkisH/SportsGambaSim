@@ -5,7 +5,7 @@ import { renderMatchDisplay } from './components/matchDisplay.js';
 import { renderPlayerCard } from './components/playerCard.js';
 import { renderActionNarrative } from './components/actionNarrative.js';
 import { renderResultsDisplay } from './components/resultsDisplay.js';
-import { generateMatch, generateMatchNarrative } from './services/geminiService.js';
+import { generateMatch, generateMatchNarrative } from "./services/aiService.js";
 import {
   validateBets,
   calculateWinner,
@@ -61,25 +61,43 @@ function renderSetupPhase() {
 async function renderBettingPhase() {
   clearElement(app);
 
-  // Show loading while generating match
-  const loadingDiv = createElement('div', 'flex items-center justify-center min-h-screen');
-  const loadingText = createElement('div', 'text-white text-3xl font-bold animate-pulse');
-  loadingText.textContent = '⚽ Generating match...';
-  loadingDiv.appendChild(loadingText);
-  app.appendChild(loadingDiv);
+  const currentState = gameState.getState();
+  let match;
 
-  // Generate match
-  const match = await generateMatch();
-  gameState.updateMatch(match);
+  // Use pre-generated match if available, otherwise generate new one
+  if (currentState.nextMatch) {
+    console.log("🚀 Using pre-generated match for instant UX");
+    match = currentState.nextMatch;
+    gameState.updateMatch(match);
+    gameState.setNextMatch(null); // Clear the pre-generated match
+  } else {
+    // Show loading while generating match
+    const loadingDiv = createElement(
+      "div",
+      "flex items-center justify-center min-h-screen"
+    );
+    const loadingText = createElement(
+      "div",
+      "text-white text-3xl font-bold animate-pulse"
+    );
+    loadingText.textContent = "⚽ Generating match...";
+    loadingDiv.appendChild(loadingText);
+    app.appendChild(loadingDiv);
+
+    // Generate match
+    match = await generateMatch();
+    gameState.updateMatch(match);
+
+    clearElement(app);
+  }
 
   // Now render betting interface
-  clearElement(app);
 
-  const wrapper = createElement('div', 'max-w-7xl mx-auto p-8');
+  const wrapper = createElement("div", "max-w-7xl mx-auto p-8");
 
   // Round number
-  const roundHeader = createElement('div', 'text-center mb-6');
-  const roundNumber = createElement('h2', 'text-3xl font-bold text-white');
+  const roundHeader = createElement("div", "text-center mb-6");
+  const roundNumber = createElement("h2", "text-3xl font-bold text-white");
   roundNumber.textContent = `Round ${gameState.getState().roundNumber}`;
   roundHeader.appendChild(roundNumber);
   wrapper.appendChild(roundHeader);
@@ -89,16 +107,25 @@ async function renderBettingPhase() {
   wrapper.appendChild(matchDisplay);
 
   // Players section
-  const playersCard = createElement('div', 'bg-white/10 backdrop-blur rounded-xl p-6 mb-6 shadow-xl');
-  const playersTitle = createElement('h3', 'text-2xl font-semibold text-white mb-4');
-  playersTitle.textContent = 'Place Your Bets';
+  const playersCard = createElement(
+    "div",
+    "bg-white/10 backdrop-blur rounded-xl p-6 mb-6 shadow-xl"
+  );
+  const playersTitle = createElement(
+    "h3",
+    "text-2xl font-semibold text-white mb-4"
+  );
+  playersTitle.textContent = "Place Your Bets";
   playersCard.appendChild(playersTitle);
 
-  const playersContainer = createElement('div', 'flex gap-4 overflow-x-auto pb-4');
-  playersContainer.id = 'players-container';
+  const playersContainer = createElement(
+    "div",
+    "flex gap-4 overflow-x-auto pb-4"
+  );
+  playersContainer.id = "players-container";
 
   const state = gameState.getState();
-  state.players.forEach(player => {
+  state.players.forEach((player) => {
     const playerCard = renderPlayerCard(player, match);
     playersContainer.appendChild(playerCard);
   });
@@ -107,14 +134,17 @@ async function renderBettingPhase() {
   wrapper.appendChild(playersCard);
 
   // Error display
-  const errorDiv = createElement('div', 'mb-4 hidden');
-  errorDiv.id = 'error-display';
+  const errorDiv = createElement("div", "mb-4 hidden");
+  errorDiv.id = "error-display";
   wrapper.appendChild(errorDiv);
 
   // Place bets button
-  const placeBetsBtn = createElement('button', 'w-full max-w-md mx-auto block bg-green-600 hover:bg-green-700 text-white font-bold py-4 px-6 rounded-lg text-xl transition-colors');
-  placeBetsBtn.textContent = 'Place All Bets & Start Match';
-  placeBetsBtn.addEventListener('click', async () => {
+  const placeBetsBtn = createElement(
+    "button",
+    "w-full max-w-md mx-auto block bg-green-600 hover:bg-green-700 text-white font-bold py-4 px-6 rounded-lg text-xl transition-colors"
+  );
+  placeBetsBtn.textContent = "Place All Bets & Start Match";
+  placeBetsBtn.addEventListener("click", async () => {
     const currentState = gameState.getState();
     const validation = validateBets(currentState.players);
 
@@ -124,7 +154,7 @@ async function renderBettingPhase() {
     }
 
     // Move to generating phase
-    gameState.setPhase('GENERATING');
+    gameState.setPhase("GENERATING");
   });
   wrapper.appendChild(placeBetsBtn);
 
@@ -132,33 +162,44 @@ async function renderBettingPhase() {
 
   // Subscribe to state changes to update only the bet choice buttons (not the whole cards)
   currentUnsubscribe = gameState.subscribe((state) => {
-    if (state.phase !== 'BETTING') return;
+    if (state.phase !== "BETTING") return;
 
     // Update only the choice button rings without re-rendering entire cards
-    state.players.forEach(player => {
+    state.players.forEach((player) => {
       const card = document.querySelector(`[data-player-id="${player.id}"]`);
       if (card) {
         // Update choice button highlights
-        const buttons = card.querySelectorAll('button[data-choice]');
-        buttons.forEach(btn => {
-          const choice = btn.getAttribute('data-choice');
+        const buttons = card.querySelectorAll("button[data-choice]");
+        buttons.forEach((btn) => {
+          const choice = btn.getAttribute("data-choice");
           if (player.betChoice === choice) {
-            btn.classList.add('ring-4', 'ring-white');
+            btn.classList.add("ring-4", "ring-white");
           } else {
-            btn.classList.remove('ring-4', 'ring-white');
+            btn.classList.remove("ring-4", "ring-white");
           }
         });
 
         // Update current bet display
-        const existingBetDisplay = card.querySelector('.current-bet-display');
+        const existingBetDisplay = card.querySelector(".current-bet-display");
         if (existingBetDisplay) {
           existingBetDisplay.remove();
         }
 
-        if (player.currentBet > 0 && player.betChoice !== 'SKIP') {
-          const currentBet = createElement('div', 'current-bet-display mt-4 text-center bg-green-600/30 rounded p-2');
-          const betText = createElement('div', 'text-white font-semibold text-sm');
-          betText.textContent = `Betting $${player.currentBet.toFixed(2)} on ${getChoiceLabelForUpdate(player.betChoice, state.currentMatch)}`;
+        if (player.currentBet > 0 && player.betChoice !== "SKIP") {
+          const currentBet = createElement(
+            "div",
+            "current-bet-display mt-4 text-center bg-green-600/30 rounded p-2"
+          );
+          const betText = createElement(
+            "div",
+            "text-white font-semibold text-sm"
+          );
+          betText.textContent = `Betting $${player.currentBet.toFixed(
+            2
+          )} on ${getChoiceLabelForUpdate(
+            player.betChoice,
+            state.currentMatch
+          )}`;
           currentBet.appendChild(betText);
           card.appendChild(currentBet);
         }
@@ -167,10 +208,10 @@ async function renderBettingPhase() {
   });
 
   function getChoiceLabelForUpdate(choice, match) {
-    if (choice === 'TEAM1') return match.team1;
-    if (choice === 'TEAM2') return match.team2;
-    if (choice === 'DRAW') return 'Draw';
-    return 'Skip';
+    if (choice === "TEAM1") return match.team1;
+    if (choice === "TEAM2") return match.team2;
+    if (choice === "DRAW") return "Draw";
+    return "Skip";
   }
 }
 
@@ -214,9 +255,26 @@ async function renderNarrativePhase() {
   const state = gameState.getState();
   clearElement(app);
 
-  await renderActionNarrative(app, state.currentMatch.actions, state.currentMatch, () => {
-    gameState.setPhase('RESULTS');
-  });
+  // Start pre-generating the next match in the background for better UX
+  console.log("🎬 Starting to pre-generate next match in background...");
+  generateMatch()
+    .then((nextMatch) => {
+      console.log("✅ Next match pre-generated and ready:", nextMatch);
+      gameState.setNextMatch(nextMatch);
+    })
+    .catch((error) => {
+      console.error("❌ Failed to pre-generate next match:", error);
+      // Don't throw - just means we'll generate on-demand later
+    });
+
+  await renderActionNarrative(
+    app,
+    state.currentMatch.actions,
+    state.currentMatch,
+    () => {
+      gameState.setPhase("RESULTS");
+    }
+  );
 }
 
 function renderResultsPhase() {
