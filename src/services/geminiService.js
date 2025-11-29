@@ -11,7 +11,14 @@ const genAI = API_KEY && API_KEY !== 'your_api_key_here'
   : null;
 
 const model = genAI
-  ? genAI.getGenerativeModel({ model: "gemini-2.0-flash-lite" })
+  ? genAI.getGenerativeModel({
+      model: "gemini-2.0-flash-lite",
+      generationConfig: {
+        temperature: 2.0,  // Maximum temperature for maximum variation
+        topP: 1.0,         // Consider all tokens
+        topK: 64           // Wider token selection
+      }
+    })
   : null;
 
 /**
@@ -19,11 +26,19 @@ const model = genAI
  * @returns {Promise<Object>} { team1, team2, odds: { team1Win, draw, team2Win } }
  */
 export async function generateMatch() {
+  console.log("Generating new match...");
   if (!model) {
     return getFallbackMatch();
   }
 
-  const prompt = `Generate a football match for a gambling game. Return ONLY valid JSON with this exact structure:
+  // Add random elements to prompt to prevent caching
+  const randomNumber = Math.random();
+  const timestamp = Date.now();
+  const randomLeagues = ['Premier League', 'La Liga', 'Serie A', 'Bundesliga', 'Ligue 1', 'MLS', 'Eredivisie', 'Liga MX'];
+  const suggestedLeague = randomLeagues[Math.floor(Math.random() * randomLeagues.length)];
+
+  const prompt = `[Request ID: ${timestamp}-${randomNumber}]
+Generate a unique football match for a gambling game, preferably from ${suggestedLeague}. Return ONLY valid JSON with this exact structure:
 {
   "team1": "Real team name",
   "team2": "Real team name",
@@ -72,6 +87,8 @@ UNDERDOGS:
     const response = await result.response;
     const text = response.text();
 
+    console.log("🤖 RAW GEMINI OUTPUT:", text);
+
     // Extract JSON from response
     const jsonMatch = text.match(/\{[\s\S]*\}/);
     if (!jsonMatch) {
@@ -80,6 +97,7 @@ UNDERDOGS:
     }
 
     const match = JSON.parse(jsonMatch[0]);
+    console.log("✅ PARSED MATCH:", match);
 
     // Validate structure
     if (!match.team1 || !match.team2 || !match.odds) {
