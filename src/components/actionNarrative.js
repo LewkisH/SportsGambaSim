@@ -33,8 +33,17 @@ export async function renderActionNarrative(container, actions, onComplete) {
     if (isSkipped) break;
 
     const action = actions[i];
+    const actionText = typeof action === 'string' ? action : action.text;
+    const isSuspenseful = typeof action === 'object' && action.suspense === true;
+
     const actionElement = createElement('div', 'bg-white/5 rounded-lg p-4 text-white text-lg fade-in');
-    actionElement.textContent = action;
+    actionElement.textContent = actionText;
+
+    // Add visual indicator for suspenseful moments
+    if (isSuspenseful) {
+      actionElement.classList.add('ring-2', 'ring-yellow-400', 'bg-white/10');
+    }
+
     actionsList.appendChild(actionElement);
 
     // Scroll to bottom
@@ -42,7 +51,9 @@ export async function renderActionNarrative(container, actions, onComplete) {
 
     // Wait before showing next action (unless it's the last one)
     if (i < actions.length - 1) {
-      await sleep(1200);
+      // Longer delay for suspenseful moments
+      const delay = isSuspenseful ? 2500 : 1200;
+      await sleep(delay);
     }
   }
 
@@ -50,8 +61,16 @@ export async function renderActionNarrative(container, actions, onComplete) {
   if (isSkipped && actionsList.children.length < actions.length) {
     clearElement(actionsList);
     actions.forEach(action => {
+      const actionText = typeof action === 'string' ? action : action.text;
+      const isSuspenseful = typeof action === 'object' && action.suspense === true;
+
       const actionElement = createElement('div', 'bg-white/5 rounded-lg p-4 text-white text-lg');
-      actionElement.textContent = action;
+      actionElement.textContent = actionText;
+
+      if (isSuspenseful) {
+        actionElement.classList.add('ring-2', 'ring-yellow-400', 'bg-white/10');
+      }
+
       actionsList.appendChild(actionElement);
     });
   }
