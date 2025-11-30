@@ -10,15 +10,16 @@ let aiProvider = null;
 let openaiClient = null;
 let geminiModel = null;
 
-if (OPENAI_API_KEY && OPENAI_API_KEY !== 'your_openai_api_key_here') {
-  aiProvider = 'openai';
+if (OPENAI_API_KEY && OPENAI_API_KEY !== "your_openai_api_key_here") {
+  aiProvider = "openai";
   openaiClient = new OpenAI({
     apiKey: OPENAI_API_KEY,
-    dangerouslyAllowBrowser: true // Required for client-side usage
+    model: "gpt-4.1-mini",
+    dangerouslyAllowBrowser: true, // Required for client-side usage
   });
-  console.log('✨ Using OpenAI (gpt-4o-mini) for AI generation');
-} else if (GEMINI_API_KEY && GEMINI_API_KEY !== 'your_api_key_here') {
-  aiProvider = 'gemini';
+  console.log("✨ Using OpenAI (gpt-4o-mini) for AI generation");
+} else if (GEMINI_API_KEY && GEMINI_API_KEY !== "your_api_key_here") {
+  aiProvider = "gemini";
   const genAI = new GoogleGenerativeAI(GEMINI_API_KEY);
   geminiModel = genAI.getGenerativeModel({
     model: "gemini-2.0-flash-lite",
@@ -28,9 +29,11 @@ if (OPENAI_API_KEY && OPENAI_API_KEY !== 'your_openai_api_key_here') {
       topK: 64,
     },
   });
-  console.log('✨ Using Gemini (gemini-2.5-flash) for AI generation');
+  console.log("✨ Using Gemini (gemini-2.0-flash-lite) for AI generation");
 } else {
-  console.warn('⚠️ No AI provider configured. Add VITE_OPENAI_API_KEY or VITE_GEMINI_API_KEY to .env file');
+  console.warn(
+    "⚠️ No AI provider configured. Add VITE_OPENAI_API_KEY or VITE_GEMINI_API_KEY to .env file"
+  );
 }
 
 /**
@@ -44,7 +47,7 @@ export async function generateMatch() {
     return getFallbackMatch();
   }
 
-  if (aiProvider === 'openai') {
+  if (aiProvider === "openai") {
     return generateMatchWithOpenAI();
   } else {
     return generateMatchWithGemini();
@@ -221,9 +224,13 @@ UNDERDOGS:
       temperature: 2.0,
       response_format: { type: "json_object" },
       messages: [
-        { role: "system", content: "You are a football match generator that returns valid JSON only." },
-        { role: "user", content: prompt }
-      ]
+        {
+          role: "system",
+          content:
+            "You are a football match generator that returns valid JSON only.",
+        },
+        { role: "user", content: prompt },
+      ],
     });
 
     const text = completion.choices[0].message.content;
@@ -253,6 +260,67 @@ UNDERDOGS:
 }
 
 /**
+ * Generate a realistic scoreline based on match result using bell curve distribution
+ * Most likely outcome: 1-0 or 0-1
+ * @param {string} result - 'TEAM1' | 'DRAW' | 'TEAM2'
+ * @returns {{team1: number, team2: number}} Final score
+ */
+function generateScoreline(result) {
+  // Helper function to generate goals with bell curve distribution (max 7)
+  // Uses Box-Muller transform for normal distribution
+  // Mean closer to 1.0 to make 1-0 most likely
+  const generateGoals = () => {
+    const mean = 0.9; // Average goals per team (peak at 1 goal)
+    const stdDev = 0.8; // Narrower distribution for more concentrated outcomes
+
+    // Box-Muller transform
+    const u1 = Math.random();
+    const u2 = Math.random();
+    const z = Math.sqrt(-2 * Math.log(u1)) * Math.cos(2 * Math.PI * u2);
+
+    // Convert to goals (clamp between 0 and 7)
+    let goals = Math.round(mean + stdDev * z);
+    goals = Math.max(0, Math.min(7, goals));
+
+    return goals;
+  };
+
+  if (result === "DRAW") {
+    // For draws, both teams score the same
+    const goals = generateGoals();
+    return { team1: goals, team2: goals };
+  } else if (result === "TEAM1") {
+    // Team 1 wins - generate loser's goals first to bias toward 1-0
+    let team2Goals = generateGoals();
+    let team1Goals = generateGoals();
+
+    // Ensure team1 wins by at least 1 goal
+    if (team1Goals <= team2Goals) {
+      team1Goals = team2Goals + 1;
+    }
+
+    // Cap at 7
+    team1Goals = Math.min(7, team1Goals);
+
+    return { team1: team1Goals, team2: team2Goals };
+  } else {
+    // Team 2 wins - generate loser's goals first to bias toward 0-1
+    let team1Goals = generateGoals();
+    let team2Goals = generateGoals();
+
+    // Ensure team2 wins by at least 1 goal
+    if (team2Goals <= team1Goals) {
+      team2Goals = team1Goals + 1;
+    }
+
+    // Cap at 7
+    team2Goals = Math.min(7, team2Goals);
+
+    return { team1: team1Goals, team2: team2Goals };
+  }
+}
+
+/**
  * Generate match narrative actions
  * @param {string} team1 - First team name
  * @param {string} team2 - Second team name
@@ -261,42 +329,84 @@ UNDERDOGS:
  */
 export async function generateMatchNarrative(team1, team2, result) {
   console.log("Generating match narrative...");
+
+  // Generate realistic scoreline
+  const finalScore = generateScoreline(result);
+  const totalGoals = finalScore.team1 + finalScore.team2;
+  const highlightCount = totalGoals * 2; // 2x the goal amounts
+
+  console.log(
+    `📊 Generated scoreline: ${finalScore.team1}-${finalScore.team2} (${totalGoals} goals, ${highlightCount} highlights)`
+  );
+
   if (!aiProvider) {
     console.log("No AI provider configured, using fallback narrative");
-    return getFallbackNarrative(team1, team2, result);
+    return getFallbackNarrative(
+      team1,
+      team2,
+      result,
+      finalScore,
+      highlightCount
+    );
   }
 
-  if (aiProvider === 'openai') {
-    return generateNarrativeWithOpenAI(team1, team2, result);
+  if (aiProvider === "openai") {
+    return generateNarrativeWithOpenAI(
+      team1,
+      team2,
+      result,
+      finalScore,
+      highlightCount
+    );
   } else {
-    return generateNarrativeWithGemini(team1, team2, result);
+    return generateNarrativeWithGemini(
+      team1,
+      team2,
+      result,
+      finalScore,
+      highlightCount
+    );
   }
 }
 
-async function generateNarrativeWithOpenAI(team1, team2, result) {
+async function generateNarrativeWithOpenAI(
+  team1,
+  team2,
+  result,
+  finalScore,
+  highlightCount
+) {
   if (!openaiClient) {
     console.log("OpenAI client not configured, using fallback narrative");
-    return getFallbackNarrative(team1, team2, result);
+    return getFallbackNarrative(
+      team1,
+      team2,
+      result,
+      finalScore,
+      highlightCount
+    );
   }
 
-  // 55% chance for thriller mode (3 extra suspenseful highlights)
-  const isThrillerMode = Math.random() < 1.0;
+  // Ensure minimum highlights for low-scoring games
+  const minHighlights = 6;
+  let actualHighlightCount = Math.max(minHighlights, highlightCount);
 
-  const resultText =
-    result === "TEAM1"
-      ? `${team1} wins`
-      : result === "TEAM2"
-      ? `${team2} wins`
-      : "Draw";
+  // 55% chance for thriller mode (1.5x more suspenseful moments)
+  const isThrillerMode = Math.random() < 0.55;
+  if (isThrillerMode) {
+    actualHighlightCount = Math.round(actualHighlightCount * 1.5);
+  }
+
+  const resultText = `${team1} ${finalScore.team1} - ${finalScore.team2} ${team2}`;
 
   let prompt;
 
   if (isThrillerMode) {
     console.log("🎬 Generating THRILLER mode narrative!");
-    prompt = `Generate a THRILLER match with 3 extra suspenseful highlights for: ${team1} vs ${team2}.
-The match result is: ${resultText}.
+    prompt = `Generate a THRILLER match for: ${team1} vs ${team2}.
+Final score MUST be: ${resultText}.
 
-Return ONLY a JSON array of 8-10 action objects with this structure:
+Return ONLY a JSON array of EXACTLY ${actualHighlightCount} action objects with this structure:
 [
   {"text": "Action 1", "suspense": false, "score": {"team1": 0, "team2": 0}},
   {"text": "Action 2", "suspense": true, "score": {"team1": 1, "team2": 0}},
@@ -313,15 +423,18 @@ Requirements for THRILLER MODE:
 - Mark 2-4 of the MOST SUSPENSEFUL moments with "suspense": true (VAR checks, last-minute chances, penalties, etc.)
 - Other actions should have "suspense": false
 - CRITICAL: Include "score" field with current score after each action
-- The FINAL score MUST match the result: ${resultText}
+- The FINAL score MUST be EXACTLY: ${finalScore.team1}-${finalScore.team2}
 - Scores should only change when goals are scored
+- Generate ${
+      finalScore.team1 + finalScore.team2
+    } GOAL actions to reach the final score
 - Return ONLY the JSON array, no additional text
 Example: [{"text": "⚽ Kickoff! High stakes match begins!", "suspense": false, "score": {"team1": 0, "team2": 0}}, {"text": "⚡ GOAL! ${team1} scores!", "suspense": false, "score": {"team1": 1, "team2": 0}}]`;
   } else {
-    prompt = `Generate 5-7 exciting football match actions for: ${team1} vs ${team2}.
-The match result is: ${resultText}.
+    prompt = `Generate exciting football match actions for: ${team1} vs ${team2}.
+Final score MUST be: ${resultText}.
 
-Return ONLY a JSON array of action objects with this structure:
+Return ONLY a JSON array of EXACTLY ${actualHighlightCount} action objects with this structure:
 [
   {"text": "Action 1", "score": {"team1": 0, "team2": 0}},
   {"text": "Action 2", "score": {"team1": 1, "team2": 0}},
@@ -335,9 +448,11 @@ Requirements:
 - Actions should build up to the final result
 - Include key moments like goals, saves, near-misses
 - CRITICAL: Include "score" field with current score after each action
-- The FINAL score MUST match the result: ${resultText}
+- The FINAL score MUST be EXACTLY: ${finalScore.team1}-${finalScore.team2}
 - Scores should only change when goals are scored
-- Actions should be appropriate for the result
+- Generate ${
+      finalScore.team1 + finalScore.team2
+    } GOAL actions to reach the final score
 - Return ONLY the JSON array, no additional text
 Example: [{"text": "⚽ Kickoff! ${team1} vs ${team2}!", "score": {"team1": 0, "team2": 0}}, {"text": "⚡ GOAL! ${team1} strikes first!", "score": {"team1": 1, "team2": 0}}]`;
   }
@@ -348,9 +463,13 @@ Example: [{"text": "⚽ Kickoff! ${team1} vs ${team2}!", "score": {"team1": 0, "
       temperature: 2.0,
       response_format: { type: "json_object" },
       messages: [
-        { role: "system", content: "You are a football match narrator that generates exciting action sequences as JSON. Always return valid JSON arrays." },
-        { role: "user", content: prompt }
-      ]
+        {
+          role: "system",
+          content:
+            "You are a football match narrator that generates exciting action sequences as JSON. Always return valid JSON arrays.",
+        },
+        { role: "user", content: prompt },
+      ],
     });
 
     const text = completion.choices[0].message.content;
@@ -359,12 +478,14 @@ Example: [{"text": "⚽ Kickoff! ${team1} vs ${team2}!", "score": {"team1": 0, "
     const parsed = JSON.parse(text);
 
     // OpenAI might wrap the array in an object, so extract the array
-    const actions = Array.isArray(parsed) ? parsed : (parsed.actions || parsed.events || []);
+    const actions = Array.isArray(parsed)
+      ? parsed
+      : parsed.actions || parsed.events || [];
     console.log("✅ PARSED ACTIONS:", actions);
 
     if (!Array.isArray(actions) || actions.length === 0) {
       console.warn("Invalid actions array, using fallback");
-      return getFallbackNarrative(team1, team2, result);
+      return getFallbackNarrative(team1, team2, result, finalScore, highlightCount);
     }
 
     // Normalize format and validate scores
@@ -398,12 +519,19 @@ Example: [{"text": "⚽ Kickoff! ${team1} vs ${team2}!", "score": {"team1": 0, "
     });
 
     // Validate final score matches result
-    const finalScore = normalizedActions[normalizedActions.length - 1]?.score;
-    if (finalScore) {
-      const scoreValid = validateFinalScore(finalScore, result);
+    const finalScoreCheck =
+      normalizedActions[normalizedActions.length - 1]?.score;
+    if (finalScoreCheck) {
+      const scoreValid = validateFinalScore(finalScoreCheck, result);
       if (!scoreValid) {
         console.warn("Final score doesn't match result, using fallback");
-        return getFallbackNarrative(team1, team2, result);
+        return getFallbackNarrative(
+          team1,
+          team2,
+          result,
+          finalScore,
+          highlightCount
+        );
       }
     }
 
@@ -411,34 +539,54 @@ Example: [{"text": "⚽ Kickoff! ${team1} vs ${team2}!", "score": {"team1": 0, "
     return normalizedActions;
   } catch (error) {
     console.error("Error generating narrative with OpenAI:", error);
-    return getFallbackNarrative(team1, team2, result);
+    return getFallbackNarrative(
+      team1,
+      team2,
+      result,
+      finalScore,
+      highlightCount
+    );
   }
 }
 
-async function generateNarrativeWithGemini(team1, team2, result) {
+async function generateNarrativeWithGemini(
+  team1,
+  team2,
+  result,
+  finalScore,
+  highlightCount
+) {
   if (!geminiModel) {
     console.log("Gemini model not configured, using fallback narrative");
-    return getFallbackNarrative(team1, team2, result);
+    return getFallbackNarrative(
+      team1,
+      team2,
+      result,
+      finalScore,
+      highlightCount
+    );
   }
 
-  // 55% chance for thriller mode (3 extra suspenseful highlights)
-  const isThrillerMode = Math.random() < 1.0;
+  // Ensure minimum highlights for low-scoring games
+  const minHighlights = 6;
+  let actualHighlightCount = Math.max(minHighlights, highlightCount);
 
-  const resultText =
-    result === "TEAM1"
-      ? `${team1} wins`
-      : result === "TEAM2"
-      ? `${team2} wins`
-      : "Draw";
+  // 55% chance for thriller mode (1.5x more suspenseful moments)
+  const isThrillerMode = Math.random() < 0.55;
+  if (isThrillerMode) {
+    actualHighlightCount = Math.round(actualHighlightCount * 1.5);
+  }
+
+  const resultText = `${team1} ${finalScore.team1} - ${finalScore.team2} ${team2}`;
 
   let prompt;
 
   if (isThrillerMode) {
     console.log("🎬 Generating THRILLER mode narrative!");
-    prompt = `Generate a THRILLER match with 3 extra suspenseful highlights for: ${team1} vs ${team2}.
-The match result is: ${resultText}.
+    prompt = `Generate a THRILLER match for: ${team1} vs ${team2}.
+Final score MUST be: ${resultText}.
 
-Return ONLY a JSON array of 8-10 action objects with this structure:
+Return ONLY a JSON array of EXACTLY ${actualHighlightCount} action objects with this structure:
 [
   {"text": "Action 1", "suspense": false, "score": {"team1": 0, "team2": 0}},
   {"text": "Action 2", "suspense": true, "score": {"team1": 1, "team2": 0}},
@@ -455,15 +603,18 @@ Requirements for THRILLER MODE:
 - Mark 2-4 of the MOST SUSPENSEFUL moments with "suspense": true (VAR checks, last-minute chances, penalties, etc.)
 - Other actions should have "suspense": false
 - CRITICAL: Include "score" field with current score after each action
-- The FINAL score MUST match the result: ${resultText}
+- The FINAL score MUST be EXACTLY: ${finalScore.team1}-${finalScore.team2}
 - Scores should only change when goals are scored
+- Generate ${
+      finalScore.team1 + finalScore.team2
+    } GOAL actions to reach the final score
 - Return ONLY the JSON array, no additional text
 Example: [{"text": "⚽ Kickoff! High stakes match begins!", "suspense": false, "score": {"team1": 0, "team2": 0}}, {"text": "⚡ GOAL! ${team1} scores!", "suspense": false, "score": {"team1": 1, "team2": 0}}]`;
   } else {
-    prompt = `Generate 5-7 exciting football match actions for: ${team1} vs ${team2}.
-The match result is: ${resultText}.
+    prompt = `Generate exciting football match actions for: ${team1} vs ${team2}.
+Final score MUST be: ${resultText}.
 
-Return ONLY a JSON array of action objects with this structure:
+Return ONLY a JSON array of EXACTLY ${actualHighlightCount} action objects with this structure:
 [
   {"text": "Action 1", "score": {"team1": 0, "team2": 0}},
   {"text": "Action 2", "score": {"team1": 1, "team2": 0}},
@@ -477,9 +628,9 @@ Requirements:
 - Actions should build up to the final result
 - Include key moments like goals, saves, near-misses
 - CRITICAL: Include "score" field with current score after each action
-- The FINAL score MUST match the result: ${resultText}
+- The FINAL score MUST be EXACTLY: ${finalScore.team1}-${finalScore.team2}
 - Scores should only change when goals are scored
-- Actions should be appropriate for the result
+- Generate ${finalScore.team1 + finalScore.team2} GOAL actions to reach the final score
 - Return ONLY the JSON array, no additional text
 Example: [{"text": "⚽ Kickoff! ${team1} vs ${team2}!", "score": {"team1": 0, "team2": 0}}, {"text": "⚡ GOAL! ${team1} strikes first!", "score": {"team1": 1, "team2": 0}}]`;
   }
@@ -517,7 +668,7 @@ Example: [{"text": "⚽ Kickoff! ${team1} vs ${team2}!", "score": {"team1": 0, "
 
     if (!Array.isArray(actions) || actions.length === 0) {
       console.warn("Invalid actions array, using fallback");
-      return getFallbackNarrative(team1, team2, result);
+      return getFallbackNarrative(team1, team2, result, finalScore, highlightCount);
     }
 
     // Normalize format and validate scores
@@ -551,12 +702,12 @@ Example: [{"text": "⚽ Kickoff! ${team1} vs ${team2}!", "score": {"team1": 0, "
     });
 
     // Validate final score matches result
-    const finalScore = normalizedActions[normalizedActions.length - 1]?.score;
-    if (finalScore) {
-      const scoreValid = validateFinalScore(finalScore, result);
+    const finalScoreCheck = normalizedActions[normalizedActions.length - 1]?.score;
+    if (finalScoreCheck) {
+      const scoreValid = validateFinalScore(finalScoreCheck, result);
       if (!scoreValid) {
         console.warn("Final score doesn't match result, using fallback");
-        return getFallbackNarrative(team1, team2, result);
+        return getFallbackNarrative(team1, team2, result, finalScore, highlightCount);
       }
     }
 
@@ -564,7 +715,7 @@ Example: [{"text": "⚽ Kickoff! ${team1} vs ${team2}!", "score": {"team1": 0, "
     return normalizedActions;
   } catch (error) {
     console.error("Error generating narrative:", error);
-    return getFallbackNarrative(team1, team2, result);
+    return getFallbackNarrative(team1, team2, result, finalScore, highlightCount);
   }
 }
 
@@ -620,120 +771,84 @@ function validateFinalScore(score, result) {
 /**
  * Fallback narrative generator
  */
-function getFallbackNarrative(team1, team2, result) {
-  const narratives = {
-    TEAM1: [
-      {
-        text: `⚽ Kickoff! ${team1} vs ${team2} begins!`,
-        suspense: false,
-        score: { team1: 0, team2: 0 },
-      },
-      {
-        text: `🏃 ${team1} dominates possession in the opening minutes`,
-        suspense: false,
-        score: { team1: 0, team2: 0 },
-      },
-      {
-        text: `💨 A brilliant run down the wing by ${team1}'s striker!`,
-        suspense: false,
-        score: { team1: 0, team2: 0 },
-      },
-      {
-        text: `⚡ GOAL! ${team1} takes the lead with a stunning strike!`,
-        suspense: false,
-        score: { team1: 1, team2: 0 },
-      },
-      {
-        text: `🛡️ ${team2} pushes forward but ${team1}'s defense holds strong`,
-        suspense: false,
-        score: { team1: 1, team2: 0 },
-      },
-      {
-        text: `🎯 Another goal! ${team1} extends their lead!`,
-        suspense: false,
-        score: { team1: 2, team2: 0 },
-      },
-      {
-        text: `⏱️ Final whistle! ${team1} wins!`,
-        suspense: false,
-        score: { team1: 2, team2: 0 },
-      },
-    ],
-    TEAM2: [
-      {
-        text: `⚽ Match begins! ${team1} vs ${team2}!`,
-        suspense: false,
-        score: { team1: 0, team2: 0 },
-      },
-      {
-        text: `🏃 ${team2} starts aggressively, pressing high`,
-        suspense: false,
-        score: { team1: 0, team2: 0 },
-      },
-      {
-        text: `💨 Quick counter-attack by ${team2}!`,
-        suspense: false,
-        score: { team1: 0, team2: 0 },
-      },
-      {
-        text: `⚡ GOAL! ${team2} scores first!`,
-        suspense: false,
-        score: { team1: 0, team2: 1 },
-      },
-      {
-        text: `🛡️ ${team1} struggles to break through ${team2}'s defense`,
-        suspense: false,
-        score: { team1: 0, team2: 1 },
-      },
-      {
-        text: `🎯 ${team2} scores again on the break!`,
-        suspense: false,
-        score: { team1: 0, team2: 2 },
-      },
-      {
-        text: `⏱️ Game over! ${team2} takes the victory!`,
-        suspense: false,
-        score: { team1: 0, team2: 2 },
-      },
-    ],
-    DRAW: [
-      {
-        text: `⚽ The match kicks off between ${team1} and ${team2}!`,
-        suspense: false,
-        score: { team1: 0, team2: 0 },
-      },
-      {
-        text: `🏃 Both teams trading attacks in a fast-paced game`,
-        suspense: false,
-        score: { team1: 0, team2: 0 },
-      },
-      {
-        text: `⚡ GOAL! ${team1} opens the scoring!`,
-        suspense: false,
-        score: { team1: 1, team2: 0 },
-      },
-      {
-        text: `💪 ${team2} fights back with intense pressure`,
-        suspense: false,
-        score: { team1: 1, team2: 0 },
-      },
-      {
-        text: `⚡ GOAL! ${team2} equalizes!`,
-        suspense: false,
-        score: { team1: 1, team2: 1 },
-      },
-      {
-        text: `🔥 End-to-end action but no one can find the winner`,
-        suspense: false,
-        score: { team1: 1, team2: 1 },
-      },
-      {
-        text: `⏱️ Final whistle! It ends in a draw!`,
-        suspense: false,
-        score: { team1: 1, team2: 1 },
-      },
-    ],
-  };
+function getFallbackNarrative(team1, team2, result, finalScore, highlightCount) {
+  // Generate a simple narrative based on the scoreline
+  const actions = [];
+  const totalGoals = finalScore.team1 + finalScore.team2;
+  const actualHighlightCount = Math.max(6, highlightCount || totalGoals * 2);
 
-  return narratives[result];
+  // Kickoff
+  actions.push({
+    text: `⚽ Kickoff! ${team1} vs ${team2} begins!`,
+    suspense: false,
+    score: { team1: 0, team2: 0 }
+  });
+
+  // Generate goal actions to match the scoreline
+  let currentScore = { team1: 0, team2: 0 };
+  const goalsNeeded = [];
+
+  // Create list of goals in order
+  for (let i = 0; i < finalScore.team1; i++) {
+    goalsNeeded.push('team1');
+  }
+  for (let i = 0; i < finalScore.team2; i++) {
+    goalsNeeded.push('team2');
+  }
+
+  // Shuffle goals for variety
+  for (let i = goalsNeeded.length - 1; i > 0; i--) {
+    const j = Math.floor(Math.random() * (i + 1));
+    [goalsNeeded[i], goalsNeeded[j]] = [goalsNeeded[j], goalsNeeded[i]];
+  }
+
+  // Distribute highlights between goals
+  const highlightsPerGoal = Math.floor((actualHighlightCount - totalGoals - 1) / (totalGoals || 1));
+  let goalIndex = 0;
+
+  for (const goalTeam of goalsNeeded) {
+    // Add a non-goal action before each goal
+    if (actions.length < actualHighlightCount - goalsNeeded.length + goalIndex) {
+      const team = goalTeam === 'team1' ? team1 : team2;
+      const actionsTemplates = [
+        `🏃 ${team} building up pressure`,
+        `💨 Quick attack by ${team}`,
+        `⚡ ${team} on the counter!`,
+        `🎯 Great chance for ${team}!`
+      ];
+      actions.push({
+        text: actionsTemplates[Math.floor(Math.random() * actionsTemplates.length)],
+        suspense: false,
+        score: { ...currentScore }
+      });
+    }
+
+    // Add goal
+    if (goalTeam === 'team1') {
+      currentScore.team1++;
+      actions.push({
+        text: `⚽ GOAL! ${team1} scores! ${currentScore.team1}-${currentScore.team2}`,
+        suspense: false,
+        score: { ...currentScore }
+      });
+    } else {
+      currentScore.team2++;
+      actions.push({
+        text: `⚽ GOAL! ${team2} scores! ${currentScore.team1}-${currentScore.team2}`,
+        suspense: false,
+        score: { ...currentScore }
+      });
+    }
+
+    goalIndex++;
+  }
+
+  // Add final whistle
+  actions.push({
+    text: `⏱️ Final whistle! ${team1} ${finalScore.team1}-${finalScore.team2} ${team2}`,
+    suspense: false,
+    score: { team1: finalScore.team1, team2: finalScore.team2 }
+  });
+
+  return actions;
 }

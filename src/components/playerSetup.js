@@ -32,7 +32,7 @@ export function renderPlayerSetup(container) {
   bonusInput.setAttribute('placeholder', 'Bonus amount per round');
   bonusInput.setAttribute('min', '0');
   bonusInput.setAttribute('step', '0.01');
-  bonusInput.setAttribute('value', '5');
+  bonusInput.setAttribute("value", "50");
   const bonusHelp = createElement('p', 'text-gray-400 text-sm mt-1');
   bonusHelp.textContent = 'Amount given to all players each round';
   bonusGroup.appendChild(bonusLabel);
